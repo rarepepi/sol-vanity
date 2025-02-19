@@ -228,12 +228,25 @@ vanity_search(uint8_t *buffer, uint64_t stride)
     }
 }
 
-__device__ bool matches_target(unsigned char *a, unsigned char *target, uint64_t n)
+__device__ bool matches_target(unsigned char *pubkey, unsigned char *target, uint64_t target_len)
 {
-    for (int i = 0; i < n; i++)
-    {
-        if (a[i] != target[i])
-            return false;
+    // Find the length of the pubkey (bs58 encoded string)
+    uint64_t pubkey_len = 0;
+    while (pubkey[pubkey_len] != '\0' && pubkey_len < 44) { // 44 is max length for bs58 encoded 32-byte value
+        pubkey_len++;
     }
+
+    // If target is longer than pubkey, no match possible
+    if (target_len > pubkey_len) {
+        return false;
+    }
+
+    // Compare characters from the end
+    for (int i = 0; i < target_len; i++) {
+        if (pubkey[pubkey_len - target_len + i] != target[i]) {
+            return false;
+        }
+    }
+
     return true;
 }
