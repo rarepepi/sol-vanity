@@ -37,16 +37,13 @@ static TOTAL_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() {
-    // Initialize the thread pool
     rayon::ThreadPoolBuilder::new().build_global().unwrap();
 
-    // Create CORS middleware
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Create the router
     let app = Router::new()
         .route("/generate", post(handle_generate))
         .layer(cors);
@@ -61,23 +58,18 @@ async fn main() {
 async fn handle_generate(Json(payload): Json<GenerateRequest>) -> Json<GenerateResponse> {
     let (tx, rx) = channel();
 
-    // Convert request parameters
     let base = parse_pubkey(&payload.base).expect("Invalid base pubkey");
     let owner = parse_pubkey(&payload.owner).expect("Invalid owner pubkey");
     let case_insensitive = payload.case_insensitive.unwrap_or(false);
 
-    // Reset counters
     EXIT.store(false, Ordering::SeqCst);
     TOTAL_ATTEMPTS.store(0, Ordering::SeqCst);
 
-    // Spawn grinding task
     std::thread::spawn(move || {
         grind_with_callback(base, owner, &payload.target, case_insensitive, tx);
     });
 
-    // Wait for result
-    let result = rx.recv().unwrap();
-    Json(result)
+    Json(rx.recv().unwrap())
 }
 
 fn grind_with_callback(
@@ -90,7 +82,6 @@ fn grind_with_callback(
     let target = get_validated_target(target, case_insensitive);
     let timer = Instant::now();
 
-    // Initialize logger
     let mut logger = Logger::new();
     logger.log_format("[{timestamp} {level}] {message}");
     logger.timestamp_format("%Y-%m-%d %H:%M:%S");
@@ -98,7 +89,8 @@ fn grind_with_callback(
 
     #[cfg(feature = "gpu")]
     let _gpu_threads: Vec<_> = (0..1)
-        .map(move |gpu_index| {
+        .map(|gpu_index| {
+            let tx = tx.clone();
             std::thread::Builder::new()
                 .name(format!("gpu{gpu_index}"))
                 .spawn(move || {
@@ -154,6 +146,7 @@ fn grind_with_callback(
 
     let num_cpus = rayon::current_num_threads() as u32;
     (0..num_cpus).into_par_iter().for_each(|_i| {
+        let tx = tx.clone();
         let base_sha = Sha256::new().chain_update(base);
 
         loop {
