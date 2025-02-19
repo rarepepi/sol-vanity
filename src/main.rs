@@ -274,7 +274,7 @@ fn grind(mut args: GrindArgs) {
                             ((count as f64 / time_sec) as u64).to_formatted_string(&Locale::en)
                         );
 
-                        if out_str_target_check.starts_with(target) {
+                        if out_str_target_check.ends_with(target) {
                             logfather::info!("out seed = {out:?} -> {}", core::str::from_utf8(&out[..16]).unwrap());
                             EXIT.store(true, Ordering::SeqCst);
                             logfather::trace!("gpu thread {gpu_index} exiting");
@@ -311,7 +311,7 @@ fn grind(mut args: GrindArgs) {
             count += 1;
 
             // Did cpu find target?
-            if out_str_target_check.starts_with(target) {
+            if out_str_target_check.ends_with(target) {
                 let time_secs = timer.elapsed().as_secs_f64();
                 logfather::info!(
                     "cpu {i} found target: {pubkey}; {seed:?} -> {} in {:.3}s; {} attempts; {} attempts per second",
