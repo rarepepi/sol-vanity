@@ -29,6 +29,10 @@ sha2 = "0.10.8"
 solana-pubkey = "2.1.0"
 solana-rpc-client = "2.1.0"
 solana-sdk = "2.1.0"
+axum = "0.6"
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+tower-http = { version = "0.4", features = ["cors"] }
 
 [build-dependencies]
 cc = { version = "1.0.98", optional = true }
