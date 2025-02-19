@@ -241,7 +241,7 @@ __device__ bool matches_target(unsigned char *pubkey, unsigned char *target, uin
         return false;
     }
 
-    // Compare characters from the end
+    // Compare characters at the end of the string
     for (int i = 0; i < target_len; i++) {
         if (pubkey[pubkey_len - target_len + i] != target[i]) {
             return false;
