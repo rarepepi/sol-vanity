@@ -29,6 +29,9 @@ static TOTAL_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::main]
 async fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     env_logger::init();
 
     let num_threads = num_cpus::get();
