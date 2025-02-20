@@ -49,7 +49,7 @@ async fn main() {
         .layer(cors);
 
     println!("Server running on http://localhost:3000");
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+    axum::Server::bind(&"0.0.0.0:8080".parse().unwrap())
         .serve(app.into_make_service())
         .await
         .unwrap();
