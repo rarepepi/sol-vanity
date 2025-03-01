@@ -82,9 +82,8 @@ fn grind_pda_with_callback(
 
     #[cfg(feature = "gpu")]
     {
-        // GPU implementation
         let mut iteration = 0;
-        let num_gpus = 1; // You might want to make this configurable
+        let num_gpus = 1;
         
         loop {
             if EXIT.load(Ordering::Acquire) {
@@ -99,16 +98,13 @@ fn grind_pda_with_callback(
                     num_gpus,
                     seed.as_ptr(),
                     program_id.as_ref().as_ptr(),
-                    &[],  // owner - adjust as needed
+                    std::ptr::null(), // Use null pointer for owner instead of empty slice
                     target.as_bytes().as_ptr(),
                     target.len() as u64,
                     out.as_mut_ptr(),
                     case_insensitive,
                 );
             }
-            
-            // Process results from GPU...
-            // You'll need to implement the logic to check if a valid result was found
             
             iteration += 1;
             TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
