@@ -49,7 +49,7 @@ async fn main() {
         .layer(cors);
 
     println!("Server running on http://localhost:3000");
-    axum::Server::bind(&"0.0.0.0:8080".parse().unwrap())
+    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service())
         .await
         .unwrap();
@@ -58,23 +58,21 @@ async fn main() {
 async fn handle_generate(Json(payload): Json<GenerateRequest>) -> Json<GenerateResponse> {
     let (tx, rx) = channel();
 
-    let base = parse_pubkey(&payload.base).expect("Invalid base pubkey");
-    let owner = parse_pubkey(&payload.owner).expect("Invalid owner pubkey");
+    let program_id = parse_pubkey(&payload.owner).expect("Invalid program ID");
     let case_insensitive = payload.case_insensitive.unwrap_or(false);
 
     EXIT.store(false, Ordering::SeqCst);
     TOTAL_ATTEMPTS.store(0, Ordering::SeqCst);
 
     std::thread::spawn(move || {
-        grind_with_callback(base, owner, &payload.target, case_insensitive, tx);
+        grind_pda_with_callback(program_id, &payload.target, case_insensitive, tx);
     });
 
     Json(rx.recv().unwrap())
 }
 
-fn grind_with_callback(
-    base: Pubkey,
-    owner: Pubkey,
+fn grind_pda_with_callback(
+    program_id: Pubkey,
     target: &str,
     case_insensitive: bool,
     tx: Sender<GenerateResponse>,
@@ -82,72 +80,9 @@ fn grind_with_callback(
     let target = get_validated_target(target, case_insensitive);
     let timer = Instant::now();
 
-    let mut logger = Logger::new();
-    logger.log_format("[{timestamp} {level}] {message}");
-    logger.timestamp_format("%Y-%m-%d %H:%M:%S");
-    logger.level(Level::Info);
-
-    #[cfg(feature = "gpu")]
-    let _gpu_threads: Vec<_> = (0..1)
-        .map(|gpu_index| {
-            let tx = tx.clone();
-            std::thread::Builder::new()
-                .name(format!("gpu{gpu_index}"))
-                .spawn(move || {
-                    let mut out = [0; 24];
-                    for iteration in 0_u64.. {
-                        if EXIT.load(Ordering::SeqCst) {
-                            return;
-                        }
-
-                        let seed = new_gpu_seed(gpu_index, iteration);
-                        unsafe {
-                            vanity_round(
-                                gpu_index,
-                                seed.as_ref().as_ptr(),
-                                base.to_bytes().as_ptr(),
-                                owner.to_bytes().as_ptr(),
-                                target.as_ptr(),
-                                target.len() as u64,
-                                out.as_mut_ptr(),
-                                case_insensitive,
-                            );
-                        }
-
-                        let reconstructed: [u8; 32] = Sha256::new()
-                            .chain_update(&base)
-                            .chain_update(&out[..16])
-                            .chain_update(&owner)
-                            .finalize()
-                            .into();
-                        let out_str = fd_bs58::encode_32(reconstructed);
-                        let out_str_target_check =
-                            maybe_bs58_aware_lowercase(&out_str, case_insensitive);
-
-                        TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-
-                        if out_str_target_check.ends_with(target) {
-                            let seed_str = core::str::from_utf8(&out[..16]).unwrap().to_string();
-                            tx.send(GenerateResponse {
-                                pubkey: out_str,
-                                seed: seed_str,
-                                attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
-                                time_taken: timer.elapsed().as_secs_f64(),
-                            })
-                            .unwrap();
-                            EXIT.store(true, Ordering::SeqCst);
-                            return;
-                        }
-                    }
-                })
-                .unwrap()
-        })
-        .collect();
-
     let num_cpus = rayon::current_num_threads() as u32;
     (0..num_cpus).into_par_iter().for_each(|_i| {
         let tx = tx.clone();
-        let base_sha = Sha256::new().chain_update(base);
 
         loop {
             if EXIT.load(Ordering::Acquire) {
@@ -155,23 +90,18 @@ fn grind_with_callback(
             }
 
             let mut seed_iter = rand::thread_rng().sample_iter(&Alphanumeric).take(16);
-            let seed: [u8; 16] = array::from_fn(|_| seed_iter.next().unwrap());
-
-            let pubkey_bytes: [u8; 32] = base_sha
-                .clone()
-                .chain_update(&seed)
-                .chain_update(owner)
-                .finalize()
-                .into();
-            let pubkey = fd_bs58::encode_32(pubkey_bytes);
-            let out_str_target_check = maybe_bs58_aware_lowercase(&pubkey, case_insensitive);
+            let seed: Vec<u8> = seed_iter.collect();
+            
+            let (pubkey, _bump) = Pubkey::find_program_address(&[&seed[..]], &program_id);
+            let pubkey_str = pubkey.to_string();
+            let out_str_target_check = maybe_bs58_aware_lowercase(&pubkey_str, case_insensitive);
 
             TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
 
             if out_str_target_check.ends_with(target) {
                 tx.send(GenerateResponse {
-                    pubkey,
-                    seed: core::str::from_utf8(&seed).unwrap().to_string(),
+                    pubkey: pubkey_str,
+                    seed: String::from_utf8(seed).unwrap(),
                     attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
                     time_taken: timer.elapsed().as_secs_f64(),
                 })
