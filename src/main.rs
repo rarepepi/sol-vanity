@@ -82,21 +82,33 @@ fn grind_pda_with_callback(
 
     #[cfg(feature = "gpu")]
     {
+        println!("Starting GPU-based search for target: {}", target);
+        println!("Case insensitive: {}", case_insensitive);
+        
         let mut iteration = 0;
-        let num_gpus = 0;
         let empty_owner = [0u8; 32];
         
         loop {
             if EXIT.load(Ordering::Acquire) {
+                println!("Received exit signal, stopping GPU search");
                 return;
             }
 
+            if iteration % 100 == 0 {
+                println!(
+                    "GPU iteration {}, total attempts: {}, elapsed: {:.2}s",
+                    iteration,
+                    TOTAL_ATTEMPTS.load(Ordering::Relaxed),
+                    timer.elapsed().as_secs_f64()
+                );
+            }
+
             let seed = new_gpu_seed(0, iteration);
-            let mut out = [0u8; 32];
+            let mut out = [0u8; 24]; // 16 bytes for seed + 8 bytes for attempt count
             
             unsafe {
                 vanity_round(
-                    num_gpus,
+                    0,  // Use GPU 0
                     seed.as_ptr(),
                     program_id.as_ref().as_ptr(),
                     empty_owner.as_ptr(),
@@ -107,8 +119,42 @@ fn grind_pda_with_callback(
                 );
             }
             
+            // First 16 bytes contain the seed if found
+            let found_seed = &out[..16];
+            // Last 8 bytes contain the number of attempts
+            let attempts = u64::from_le_bytes(out[16..24].try_into().unwrap());
+            
+            let previous_attempts = TOTAL_ATTEMPTS.fetch_add(attempts, Ordering::Relaxed);
+            
+            if attempts > 0 {
+                println!(
+                    "GPU batch completed: +{} attempts (total: {})",
+                    attempts,
+                    previous_attempts + attempts
+                );
+            }
+            
+            // If a result was found (non-zero seed)
+            if found_seed.iter().any(|&x| x != 0) {
+                let (pubkey, _bump) = Pubkey::find_program_address(&[found_seed], &program_id);
+                println!("GPU found result!");
+                println!("Seed: {}", String::from_utf8_lossy(found_seed));
+                println!("Pubkey: {}", pubkey);
+                
+                tx.send(GenerateResponse {
+                    pubkey: pubkey.to_string(),
+                    seed: String::from_utf8(found_seed.to_vec()).unwrap(),
+                    attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
+                    time_taken: timer.elapsed().as_secs_f64(),
+                })
+                .unwrap();
+                
+                EXIT.store(true, Ordering::Release);
+                println!("GPU search completed successfully");
+                break;
+            }
+            
             iteration += 1;
-            TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         }
     }
 
