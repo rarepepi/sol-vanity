@@ -83,7 +83,7 @@ fn grind_pda_with_callback(
     #[cfg(feature = "gpu")]
     {
         let mut iteration = 0;
-        let num_gpus = 1;
+        let num_gpus = 0;
         
         loop {
             if EXIT.load(Ordering::Acquire) {
@@ -98,7 +98,7 @@ fn grind_pda_with_callback(
                     num_gpus,
                     seed.as_ptr(),
                     program_id.as_ref().as_ptr(),
-                    std::ptr::null(), // Use null pointer for owner instead of empty slice
+                    std::ptr::null(),
                     target.as_bytes().as_ptr(),
                     target.len() as u64,
                     out.as_mut_ptr(),
