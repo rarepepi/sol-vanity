@@ -84,6 +84,7 @@ fn grind_pda_with_callback(
     {
         let mut iteration = 0;
         let num_gpus = 0;
+        let empty_owner = [0u8; 32];
         
         loop {
             if EXIT.load(Ordering::Acquire) {
@@ -98,7 +99,7 @@ fn grind_pda_with_callback(
                     num_gpus,
                     seed.as_ptr(),
                     program_id.as_ref().as_ptr(),
-                    std::ptr::null(),
+                    empty_owner.as_ptr(),
                     target.as_bytes().as_ptr(),
                     target.len() as u64,
                     out.as_mut_ptr(),
