@@ -80,37 +80,76 @@ fn grind_pda_with_callback(
     let target = get_validated_target(target, case_insensitive);
     let timer = Instant::now();
 
-    let num_cpus = rayon::current_num_threads() as u32;
-    (0..num_cpus).into_par_iter().for_each(|_i| {
-        let tx = tx.clone();
-
+    #[cfg(feature = "gpu")]
+    {
+        // GPU implementation
+        let mut iteration = 0;
+        let num_gpus = 1; // You might want to make this configurable
+        
         loop {
             if EXIT.load(Ordering::Acquire) {
                 return;
             }
 
-            let mut seed_iter = rand::thread_rng().sample_iter(&Alphanumeric).take(16);
-            let seed: Vec<u8> = seed_iter.collect();
+            let seed = new_gpu_seed(0, iteration);
+            let mut out = [0u8; 32];
             
-            let (pubkey, _bump) = Pubkey::find_program_address(&[&seed[..]], &program_id);
-            let pubkey_str = pubkey.to_string();
-            let out_str_target_check = maybe_bs58_aware_lowercase(&pubkey_str, case_insensitive);
-
-            TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-
-            if out_str_target_check.ends_with(target) {
-                tx.send(GenerateResponse {
-                    pubkey: pubkey_str,
-                    seed: String::from_utf8(seed).unwrap(),
-                    attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
-                    time_taken: timer.elapsed().as_secs_f64(),
-                })
-                .unwrap();
-                EXIT.store(true, Ordering::Release);
-                break;
+            unsafe {
+                vanity_round(
+                    num_gpus,
+                    seed.as_ptr(),
+                    program_id.as_ref().as_ptr(),
+                    &[],  // owner - adjust as needed
+                    target.as_bytes().as_ptr(),
+                    target.len() as u64,
+                    out.as_mut_ptr(),
+                    case_insensitive,
+                );
             }
+            
+            // Process results from GPU...
+            // You'll need to implement the logic to check if a valid result was found
+            
+            iteration += 1;
+            TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         }
-    });
+    }
+
+    #[cfg(not(feature = "gpu"))]
+    {
+        // ... existing CPU implementation ...
+        let num_cpus = rayon::current_num_threads() as u32;
+        (0..num_cpus).into_par_iter().for_each(|_i| {
+            let tx = tx.clone();
+
+            loop {
+                if EXIT.load(Ordering::Acquire) {
+                    return;
+                }
+
+                let mut seed_iter = rand::thread_rng().sample_iter(&Alphanumeric).take(16);
+                let seed: Vec<u8> = seed_iter.collect();
+                
+                let (pubkey, _bump) = Pubkey::find_program_address(&[&seed[..]], &program_id);
+                let pubkey_str = pubkey.to_string();
+                let out_str_target_check = maybe_bs58_aware_lowercase(&pubkey_str, case_insensitive);
+
+                TOTAL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+
+                if out_str_target_check.ends_with(target) {
+                    tx.send(GenerateResponse {
+                        pubkey: pubkey_str,
+                        seed: String::from_utf8(seed).unwrap(),
+                        attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
+                        time_taken: timer.elapsed().as_secs_f64(),
+                    })
+                    .unwrap();
+                    EXIT.store(true, Ordering::Release);
+                    break;
+                }
+            }
+        });
+    }
 }
 
 fn get_validated_target(target: &str, case_insensitive: bool) -> &'static str {
