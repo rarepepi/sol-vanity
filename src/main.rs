@@ -137,21 +137,30 @@ fn grind_pda_with_callback(
             // If a result was found (non-zero seed)
             if found_seed.iter().any(|&x| x != 0) {
                 let (pubkey, _bump) = Pubkey::find_program_address(&[found_seed], &program_id);
-                println!("GPU found result!");
-                println!("Seed: {}", String::from_utf8_lossy(found_seed));
-                println!("Pubkey: {}", pubkey);
+                let pubkey_str = pubkey.to_string();
+                let check_str = maybe_bs58_aware_lowercase(&pubkey_str, case_insensitive);
                 
-                tx.send(GenerateResponse {
-                    pubkey: pubkey.to_string(),
-                    seed: String::from_utf8(found_seed.to_vec()).unwrap(),
-                    attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
-                    time_taken: timer.elapsed().as_secs_f64(),
-                })
-                .unwrap();
-                
-                EXIT.store(true, Ordering::Release);
-                println!("GPU search completed successfully");
-                break;
+                // Verify this actually matches our target
+                if check_str.ends_with(target) {
+                    println!("GPU found valid result!");
+                    println!("Seed: {}", String::from_utf8_lossy(found_seed));
+                    println!("Pubkey: {}", pubkey);
+                    
+                    tx.send(GenerateResponse {
+                        pubkey: pubkey.to_string(),
+                        seed: String::from_utf8(found_seed.to_vec()).unwrap(),
+                        attempts: TOTAL_ATTEMPTS.load(Ordering::Relaxed),
+                        time_taken: timer.elapsed().as_secs_f64(),
+                    })
+                    .unwrap();
+                    
+                    EXIT.store(true, Ordering::Release);
+                    println!("GPU search completed successfully");
+                    break;
+                } else {
+                    println!("GPU returned non-matching result, continuing search...");
+                    println!("Got: {}, wanted suffix: {}", pubkey_str, target);
+                }
             }
             
             iteration += 1;
